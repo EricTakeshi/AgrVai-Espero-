@@ -57,6 +57,12 @@ wiz_NetInfo gWIZNETINFO = {
 //Definicoes para o modo de servidor
 #define LISTEN_PORT 5000  //define a porta que vai ser utilizada para o cliente se conectar no servidor
 #define RECEIVE_BUFF_SIZE 128 //tamanho maximo de caracteres a ser recebido* (perguntar pra ter certeza)
+
+//defines do TMP100
+#define TMP100_ADDR        (0x48 << 1)
+
+#define TMP100_REG_TEMP    0x00
+#define TMP100_REG_CONFIG  0x01
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -86,6 +92,8 @@ static void UWriteData(const char data);
 static void PHYStatusCheck(void);
 static void PrintPHYConf(void);
 static void PrintServerCheck(void);
+void TMP100_Init(void);
+float TMP100_ReadTemp(void);
 
 
 
@@ -250,6 +258,15 @@ int main(void)
 #if 1
 	  if(snaux == 1 && tmaux == 1)
 	  {
+		  // Leitura do Sensor
+		  float temperatura = TMP100_ReadTemp();
+		  // Imprime na serial para debug
+		  printf("Temperatura Sala: %.2f C\r\n", temperatura);
+		  // Se quiser enviar pelo W5500 (exemplo):
+
+		  char msg_temp[50];
+		  sprintf(msg_temp, "Temp: %.2f", temperatura);
+		  send(sn, (uint8_t*)msg_temp, strlen(msg_temp));
 		  HAL_GPIO_TogglePin(LD1G_GPIO_Port,LD1G_Pin);
 		  if(send(sn, "Hello World!\r\n", 16)<=SOCK_ERROR) //envia o a mensagem para o servidor, sendo o segundo componente a mensagem e o terceiro o numero de caracteres
 		  {
@@ -546,6 +563,52 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
 }
 
+//funções do TMP100
+void TMP100_Init(void) {
+    uint8_t data[2];
+
+    // Seleciona o registrador de Configuração
+    data[0] = TMP100_REG_CONFIG;
+
+    // Configura para 12-bit resolution (Bits R1/R0 = 11)
+    // Valor 0x60 = 0110 0000 em binário
+    data[1] = 0x60;
+
+    // Envia o comando
+    if (HAL_I2C_Master_Transmit(&hi2c2, TMP100_ADDR, data, 2, 100) != HAL_OK) {
+        printf("Erro ao inicializar TMP100\r\n");
+    } else {
+        printf("TMP100 Configurado para 12-bits.\r\n");
+    }
+}
+
+float TMP100_ReadTemp(void) {
+    uint8_t buffer[2];
+    int16_t raw_temp;
+
+    // 1. Aponta para o registrador de temperatura
+    buffer[0] = TMP100_REG_TEMP;
+    HAL_I2C_Master_Transmit(&hi2c2, TMP100_ADDR, buffer, 1, 100);
+
+    // 2. Lê 2 bytes de dados
+    if (HAL_I2C_Master_Receive(&hi2c2, TMP100_ADDR, buffer, 2, 100) == HAL_OK) {
+
+        // 3. Combina os bytes
+        // O TMP100 retorna 12 bits alinhados à esquerda dentro de 16 bits
+        // Ex: [Temp Alta] [Temp Baixa]
+        raw_temp = (buffer[0] << 8) | buffer[1];
+
+        // Desloca 4 bits para a direita (para alinhar os 12 bits)
+        raw_temp = raw_temp >> 4;
+
+        // Multiplica pela resolução de 12 bits (0.0625)
+        return raw_temp * 0.0625f;
+    }
+    else {
+        printf("Erro de leitura I2C\r\n");
+        return -999.0f; // Valor de erro
+    }
+}
 
 
 

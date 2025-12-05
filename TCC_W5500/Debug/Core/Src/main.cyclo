@@ -1,0 +1,8 @@
+../Core/Src/main.c:99:5:main	13
+../Core/Src/main.c:401:6:SystemClock_Config	3
+../Core/Src/main.c:443:6:UWriteData	2
+../Core/Src/main.c:451:5:__io_putchar	1
+../Core/Src/main.c:458:6:PHYStatusCheck	3
+../Core/Src/main.c:478:6:PrintPHYConf	5
+../Core/Src/main.c:521:6:PrintServerCheck	2
+../Core/Src/main.c:550:6:Error_Handler	1

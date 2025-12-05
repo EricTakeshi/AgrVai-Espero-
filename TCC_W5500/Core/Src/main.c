@@ -18,7 +18,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "i2c.h"
 #include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -72,6 +74,8 @@ uint16_t destination_port = 2222; //define a porta na qual sera procurada quando
 uint8_t receive_buff[RECEIVE_BUFF_SIZE];//to receive data from client
 uint8_t sn = 1;//define o socket a ser utilizado podendo ser de 0-7
 uint8_t minha_porta_local = 5000;
+uint8_t snaux = 0;
+uint8_t tmaux = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -122,8 +126,11 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI1_Init();
   MX_USART2_UART_Init();
+  MX_I2C2_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   __HAL_SPI_ENABLE(&hspi1);
+  HAL_TIM_Base_Start_IT(&htim2);
 
   printf("My W5500 Application!\r\n");
 
@@ -159,113 +166,102 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	//Return value of the send() function is the amount of data sent
-	  switch(getSn_SR(sn)) // Lê o Status Register do Socket
-	  		 	  	  {
-	  		 	  	      case SOCK_CLOSED:
-	  		 	  	          // 1. Se o socket está FECHADO, precisamos abri-lo primeiro.
-	  		 	  	          // Se a conexão anterior falhou, o W5500 volta para cá automaticamente.
-	  		 	  	    	  printf("Socket Fechado. Reabrindo...\r\n");
-
-	  		 	  	    	    // Incrementa a porta para o servidor não confundir com a conexão anterior
-	  		 	  	    	    minha_porta_local++;
-	  		 	  	    	    if (minha_porta_local > 60000) minha_porta_local = 5000; // Reseta se ficar muito alto
-
-	  		 	  	    	    // Usa a porta variável
-	  		 	  	    	    if(socket(sn, Sn_MR_TCP, minha_porta_local, 0) == sn) {
-	  		 	  	    	        printf("Socket Aberto na porta local: %d. Estado -> INIT\r\n", minha_porta_local);
-	  		 	  	    	    } else {
-	  		 	  	    	        printf("Falha ao criar socket.\r\n");
-	  		 	  	    	    }
-	  		 	  	    	    break;
-
-	  		 	  	      case SOCK_INIT:
-	  		 	  	    	if(destination_ip[0] == 0) {
-	  		 	  	    	         printf("ERRO: IP Zerado. Arrumando...\r\n");
-	  		 	  	    	         // Força o IP aqui se necessário, ou trava
-	  		 	  	    	         break;
-	  		 	  	    	    }
-
-	  		 	  	    	    // 2. Chama o connect
-	  		 	  	    	    printf("Enviando SYN para %d.%d.%d.%d...\r\n", destination_ip[0], destination_ip[1], destination_ip[2], destination_ip[3]);
-	  		 	  	    	    int8_t ret = connect(sn, destination_ip, destination_port);
-
-	  		 	  	    	    // 3. Análise do Erro
-	  		 	  	    	    if (ret == SOCK_OK) {
-	  		 	  	    	        printf("Comando aceito. Aguardando resposta do servidor...\r\n");
-	  		 	  	    	    }
-	  		 	  	    	    else if (ret == -13) { // SOCKERR_TIMEOUT
-	  		 	  	    	        printf("ERRO -13: TIMEOUT! O PC nao respondeu. Verifique Firewall e Cabo.\r\n");
-	  		 	  	    	        close(sn); // Fecha para tentar de novo
-	  		 	  	    	    }
-	  		 	  	    	    else if (ret == -4) { // SOCKERR_SOCKCLOSED
-	  		 	  	    	        printf("ERRO -4: Socket Fechado! O comando socket() anterior falhou ou foi lento.\r\n");
-	  		 	  	    	        close(sn); // Reinicia o ciclo
-	  		 	  	    	    }
-	  		 	  	    	    else {
-	  		 	  	    	        printf("ERRO desconhecido: %d\r\n", ret);
-	  		 	  	    	        close(sn);
-	  		 	  	    	    }
-
-	  		 	  	    	    // DELAY CRUCIAL: Impede que o erro -4 aconteça em loop infinito
-	  		 	  	    	    HAL_Delay(1000);
-	  		 	  	    	    break;
-
-	  		 	  	      case SOCK_ESTABLISHED:
-	  		 	  	          // 3. Conexão feita! O servidor aceitou.
-	  		 	  	          // Verifique se tem dados chegando
-	  		 	  	          if(getSn_IR(sn) & Sn_IR_CON) {
-	  		 	  	               setSn_IR(sn, Sn_IR_CON); // Limpa flag de interrupção de conexão
-	  		 	  	               // Pode acender um LED indicando conexão aqui
-	  		 	  	          }
-	  		 	  	          printf("\r\nConexao Realizada");
-
-	  		 	  	          // Sua lógica de envio/recebimento de dados entra aqui
-	  		 	  	          uint16_t tamanho = getSn_RX_RSR(sn); // Verifica dados recebidos
-	  		 	  	          if(tamanho > 0) {
-	  		 	  	              recv(sn, receive_buff, tamanho); // Lê os dados
-	  		 	  	          }
-	  		 	  	        if(send(sn, "Hello World!\r\n", 16)<=SOCK_ERROR) //envia o a mensagem para o servidor, sendo o segundo componente a mensagem e o terceiro o numero de caracteres
-	  		 	  	     	{
-	  		 	  	     	  printf("\r\nSending Failed!");//envia que a mensagem nao foi enviada para a serial caso o servidor tenha sido fechado, gerando um erro no socket pois fechou a conexao
-	  		 	  	     	  while(1);
-	  		 	  	     	}
-
-	  		 	  	     	else
-	  		 	  	     	{
-	  		 	  	     	  printf("\r\nSending Success!"); //apensa um retorno pela serial que foi executado com sucesso o envio da mensagem
-	  		 	  	     	}
-	  		 	  	          break;
-
-	  		 	  	      case SOCK_CLOSE_WAIT:
-	  		 	  	          // 4. O servidor mandou fechar a conexão (FIN).
-	  		 	  	          // Devemos desconectar e fechar o socket para reiniciar o ciclo.
-	  		 	  	          disconnect(sn);
-	  		 	  	          close(sn);
-	  		 	  	          break;
-
-	  		 	  	      default:
-	  		 	  	          // Tratamento de erros/timeouts
-	  		 	  	          // Se ficar travado em SYN_SENT (tentando conectar) por muito tempo, feche.
-	  		 	  	          break;
-	  		 	  	  }
-#if 0
-    HAL_GPIO_WritePin(LD1G_GPIO_Port,LD1G_Pin,GPIO_PIN_SET);
-
-	if(send(sn, "Hello World!\r\n", 16)<=SOCK_ERROR) //envia o a mensagem para o servidor, sendo o segundo componente a mensagem e o terceiro o numero de caracteres
+	switch(getSn_SR(sn)) // Lê o Status Register do SockeT
 	{
-	  printf("\r\nSending Failed!");//envia que a mensagem nao foi enviada para a serial caso o servidor tenha sido fechado, gerando um erro no socket pois fechou a conexao
-	  while(1);
-	}
-
-	else
-	{
-	  printf("\r\nSending Success!"); //apensa um retorno pela serial que foi executado com sucesso o envio da mensagem
+	    case SOCK_CLOSED:
+		// 1. Se o socket está FECHADO, precisamos abri-lo primeiro.
+		// Se a conexão anterior falhou, o W5500 volta para cá automaticamente.
+		printf("Socket Fechado. Reabrindo...\r\n");
+		// Incrementa a porta para o servidor não confundir com a conexão anterior
+		minha_porta_local++;
+		if (minha_porta_local > 60000) minha_porta_local = 5000; // Reseta se ficar muito alto
+		// Usa a porta variável
+		if(socket(sn, Sn_MR_TCP, minha_porta_local, 0) == sn)
+		{
+			printf("Socket Aberto na porta local: %d. Estado -> INIT\r\n", minha_porta_local);
+		}
+		else
+		{
+			printf("Falha ao criar socket.\r\n");
+		}
+		break;
+		case SOCK_INIT:
+			if(destination_ip[0] == 0)
+			{
+				printf("ERRO: IP Zerado. Arrumando...\r\n");
+				// Força o IP aqui se necessário, ou trava
+				break;
+			}
+			// 2. Chama o connect
+			printf("Enviando SYN para %d.%d.%d.%d...\r\n", destination_ip[0], destination_ip[1], destination_ip[2], destination_ip[3]);
+			int8_t ret = connect(sn, destination_ip, destination_port);
+			// 3. Análise do Erro
+			if (ret == SOCK_OK)
+			{
+				printf("Comando aceito. Aguardando resposta do servidor...\r\n");
+			}
+			else if (ret == -13) { // SOCKERR_TIMEOUT
+				printf("ERRO -13: TIMEOUT! O PC nao respondeu. Verifique Firewall e Cabo.\r\n");
+				close(sn); // Fecha para tentar de novo
+				}
+			else if (ret == -4) { // SOCKERR_SOCKCLOSED
+				printf("ERRO -4: Socket Fechado! O comando socket() anterior falhou ou foi lento.\r\n");
+				close(sn); // Reinicia o ciclo
+				}
+			else {
+				printf("ERRO desconhecido: %d\r\n", ret);
+				close(sn);
+			}
+			// DELAY CRUCIAL: Impede que o erro -4 aconteça em loop infinito
+			HAL_Delay(1000);
+			break;
+			case SOCK_ESTABLISHED:
+				// 3. Conexão feita! O servidor aceitou.
+				// Verifique se tem dados chegando
+				if(getSn_IR(sn) & Sn_IR_CON) {
+					setSn_IR(sn, Sn_IR_CON); // Limpa flag de interrupção de conexão
+					// Pode acender um LED indicando conexão aqui
+					}
+				if(snaux == 0)
+				{
+					printf("\r\nConexao Realizada");
+				}
+				// Sua lógica de envio/recebimento de dados entra aqui
+				uint16_t tamanho = getSn_RX_RSR(sn); // Verifica dados recebidos
+				if(tamanho > 0) {
+					recv(sn, receive_buff, tamanho); // Lê os dados
+					}
+				snaux = 1;
+				break;
+			case SOCK_CLOSE_WAIT:
+				// 4. O servidor mandou fechar a conexão (FIN).
+				// Devemos desconectar e fechar o socket para reiniciar o ciclo.
+				disconnect(sn);
+				close(sn);
+				snaux = 0;
+				HAL_Delay(1000);
+				break;
+			default:
+				// Tratamento de erros/timeouts
+				// Se ficar travado em SYN_SENT (tentando conectar) por muito tempo, feche.
+				break;
 	}
 #endif
-	HAL_Delay(1000);
-
-  }
-}
+#if 1
+	  if(snaux == 1 && tmaux == 1)
+	  {
+		  HAL_GPIO_TogglePin(LD1G_GPIO_Port,LD1G_Pin);
+		  if(send(sn, "Hello World!\r\n", 16)<=SOCK_ERROR) //envia o a mensagem para o servidor, sendo o segundo componente a mensagem e o terceiro o numero de caracteres
+		  {
+			  printf("\r\nSending Failed!");//envia que a mensagem nao foi enviada para a serial caso o servidor tenha sido fechado, gerando um erro no socket pois fechou a conexao
+			  while(1);
+		  }
+		  else
+		  {
+			  printf("\r\nSending Success!"); //apensa um retorno pela serial que foi executado com sucesso o envio da mensagem
+		  }
+		  tmaux = 0;
+	  }
 #endif
 #if 0 //Funcionando como Server
 	printf("\r\n*****************SIMPLE TCP ECHO SERVER******************\r\n");
@@ -388,11 +384,12 @@ int main(void)
 	  }//if block, client connect success
   }//while loop for next client wait
 #endif
+	}
 
 
 
   /* USER CODE END 3 */
-
+}
 
 /**
   * @brief System Clock Configuration
@@ -535,6 +532,18 @@ void PrintServerCheck(void)
 		while(1); //deixa o micro em loop eterno fazendo nada
 
 	}
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    // Verifica se quem chamou foi realmente o TIM2 (caso tenha outros timers)
+    if (htim->Instance == TIM2)
+    {
+        // AÇÃO 1: Piscar um LED para debug visual (opcional)
+        tmaux = 1;
+        // AÇÃO 3: Contador global (opcional)
+        // segundos_totais++;
+    }
 }
 
 

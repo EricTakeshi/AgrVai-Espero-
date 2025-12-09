@@ -38,6 +38,14 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef enum {
+    LD1G = 0,
+    LD2B,
+	LD3R,
+	SAIR,
+	TEMP,
+	DESCONHECIDO
+} ComandosID;
 
 
 /* USER CODE END PTD */
@@ -92,14 +100,15 @@ void SystemClock_Config(void);
 static void UWriteData(const char data);
 static void PHYStatusCheck(void);
 static void PrintPHYConf(void);
-static void PrintServerCheck(void);
 void TMP100_Init(void);
 float TMP100_ReadTemp(void);
 void Socket_Status(void);
 void Modo_Client_Sensor_Temp(void);
 void Modo_Server(void);
-void Verificar_Configuracao(void);
 void I2C_Scanner(void);
+void OnOff_Led_RedeCMD(void);
+void Modo_Client(void);
+ComandosID InterpretarComando(char* buffer);
 
 
 
@@ -147,36 +156,22 @@ int main(void)
   __HAL_SPI_ENABLE(&hspi1);
   HAL_TIM_Base_Start_IT(&htim2);
 
-  printf("My W5500 Application!\r\n");
+  printf("Inicializando W5500!\r\n");
 
    W5500Init();
    TMP100_Init();
-   I2C_Scanner();
+   //I2C_Scanner();
 
    ctlnetwork(CN_SET_NETINFO, (void*) &gWIZNETINFO);//envia os dados do adapatador definidos anteriormente para inicialializacao
 
-   //PHYStatusCheck();//checa a presenca da conexao pelo cabo ethernet ate que haja uma conexao
-   //PrintPHYConf();//envia os dados da configuracao do adaptador
+   PHYStatusCheck();//checa a presenca da conexao pelo cabo ethernet ate que haja uma conexao
+   PrintPHYConf();//envia os dados da configuracao do adaptador
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-#if 0
-   while (1)
-   {
-	   // Leitura do Sensor
-	   if(tmaux == 1)
-	   {
-		   temperatura = TMP100_ReadTemp();
-		   printf("Temperatura Sala: %.2f C\r\n", temperatura);
-		   tmaux = 0;
-	   }
 
-	   // Imprime na serial para debug
-#endif
-
-#if 1
 
   while (1)
   {
@@ -184,23 +179,10 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	//Return value of the send() function is the amount of data sent
-	Socket_Status();
-#endif
-#if 1
-	 Modo_Client_Sensor_Temp();
-#endif
-#if 0 //Funcionando como Server
-	printf("\r\n*****************SIMPLE TCP ECHO SERVER******************\r\n");
+	Modo_Client();
+	//Modo_Server();
 
-	while(1)
-	{
-	  Modo_Server();
-  }//while loop for next client wait
-#endif
-	}
-
-
-
+  }
   /* USER CODE END 3 */
 }
 
@@ -328,24 +310,6 @@ void PrintPHYConf(void)
 	}
 }
 
-void PrintServerCheck(void)
-{
-
-	printf("\r\nConnecting to server: %d.%d.%d.%d @ TCP Port: %d",destination_ip[0],destination_ip[1],destination_ip[2],destination_ip[3],destination_port);
-
-	if(connect(sn, destination_ip, destination_port)==SOCK_OK) //busca a conexao com o server
-	{
-		printf("\r\nConnected with server.");
-	}
-	else
-	{
-		//failed
-		printf("\r\nCannot connect with server!");
-		printf("\r\nAbra o servidor e reinicialize o microcontrolador\r\n");
-		while(1); //deixa o micro em loop eterno fazendo nada
-
-	}
-}
 
 void Socket_Status(void)
 {
@@ -426,15 +390,12 @@ if(snaux == 1 && tmaux == 1)
 	  {
 		  // Leitura do Sensor
 		  float temperatura = TMP100_ReadTemp();
-		  // Imprime na serial para debug
 		  printf("Temperatura Sala: %.2f C\r\n", temperatura);
-		  // Se quiser enviar pelo W5500 (exemplo):
-
 		  char msg_temp[50];
 		  sprintf(msg_temp, "Temp: %.2f C\r\n", temperatura);
 		  send(sn, (uint8_t*)msg_temp, strlen(msg_temp));
-		  HAL_GPIO_TogglePin(LD1G_GPIO_Port,LD1G_Pin);
-		  if(send(sn, "Hello World!\r\n", 16)<=SOCK_ERROR) //envia o a mensagem para o servidor, sendo o segundo componente a mensagem e o terceiro o numero de caracteres
+
+		  if((send(sn, (uint8_t*)msg_temp, strlen(msg_temp)))<=SOCK_ERROR) //envia o a mensagem para o servidor, sendo o segundo componente a mensagem e o terceiro o numero de caracteres
 		  {
 			  printf("\r\nSending Failed!");//envia que a mensagem nao foi enviada para a serial caso o servidor tenha sido fechado, gerando um erro no socket pois fechou a conexao
 			  while(1);
@@ -444,140 +405,186 @@ if(snaux == 1 && tmaux == 1)
 			  printf("\r\nSending Success!"); //apensa um retorno pela serial que foi executado com sucesso o envio da mensagem
 		  }
 		  tmaux = 0;
-		  uint16_t tamanho = getSn_RX_RSR(sn); // Verifica dados recebidos
-		  if(tamanho > 0)
-		  {
-			  recv(sn, receive_buff, tamanho); // Lê os dado
-		  }
 	  }
 }
+
+void OnOff_Led_RedeCMD(void)
+{
+	if(snaux == 1)
+	{
+		int len=recv(sn, receive_buff, RECEIVE_BUFF_SIZE);
+		if(len > 0)
+		{
+			switch (InterpretarComando(((char*) receive_buff)))
+			{
+			case LD1G:
+					HAL_GPIO_TogglePin(LD1G_GPIO_Port,LD1G_Pin);
+			break;
+			case LD2B:
+					HAL_GPIO_TogglePin(LD2B_GPIO_Port,LD2B_Pin);
+			break;
+			case LD3R:
+					HAL_GPIO_TogglePin(LD3R_GPIO_Port,LD3R_Pin);
+			break;
+			default:
+				send(sn,(uint8_t*)"Funcao Desconhecida\r\n",21);
+			break;
+			}
+		}
+	}
+}
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-    // Verifica se quem chamou foi realmente o TIM2 (caso tenha outros timers)
     if (htim->Instance == TIM2)
     {
-        // AÇÃO 1: Piscar um LED para debug visual (opcional)
-        tmaux = 1;
-        // AÇÃO 3: Contador global (opcional)
-        // segundos_totais++;
+    	tmaux = 1;
     }
 }
+
+void Modo_Client(void)
+{
+	Socket_Status();
+	Modo_Client_Sensor_Temp();
+	OnOff_Led_RedeCMD();
+}
+
 void Modo_Server(void)
 {
 	printf("\r\nInitializing server socket\r\n");
-		  //Parameters in order socket_id, protocol TCP or UDP, Port number, Flags=0
-		  //Return value is socket ID on success
-		  if(sn>7)//verifica se o valor do socket esta dentro dos valores existentes
-		  {
-		    //error
-		    printf("Valor do Socket acima do permitido!\r\n");
-		    while(1);//halt here
-		  }
-		  if(socket(sn,Sn_MR_TCP,LISTEN_PORT,0)!=sn)//definindo o socket como servidor
-		  {
-			  //error
-			  printf("Cannot create Socket!\r\n");
-			  while(1);//halt here
-		  }
+	//Parameters in order socket_id, protocol TCP or UDP, Port number, Flags=0
+	//Return value is socket ID on success
+	if(sn>7)//verifica se o valor do socket esta dentro dos valores existentes
+	{
+		//error
+		printf("Valor do Socket acima do permitido!\r\n");
+		while(1);//halt here
+	}
+	if(socket(sn,Sn_MR_TCP,LISTEN_PORT,0)!=sn)//definindo o socket como servidor
+	{
+		//error
+		printf("Cannot create Socket!\r\n");
+		while(1);//halt here
+	}
+	 //success
+	printf("Socket Created Successfully ! \r\n");
+	uint8_t socket_io_mode=SOCK_IO_BLOCK;
+	ctlsocket(sn, CS_SET_IOMODE , &socket_io_mode);//set blocking IO mode
+	printf("Start listening on port %d ! \r\n",LISTEN_PORT);
+	printf("Waiting for a client connection. \r\n");
+	//Make it a passive socket (i.e. listen for connection)
+	if(listen(sn)!=SOCK_OK)//our socket id is 1 (w5500 have 8 sockets from 0-7)
+	{
+		//error
+		printf("Cannot listen on port %d",LISTEN_PORT);
+		while(1);
+	}
+	uint8_t sr=0x00;//socket status register
+	do
+	{
+		sr=getSn_SR(sn);//read status reg (SR of socket 1)
+	}while (sr!=0x17 && sr!=0x00);
+	if(sr==0x00)
+	{
+		printf("Some error occurred on server socket. Please restart.\r\n");
+		while(1);
+	}
+	if(sr==0x17)
+	{
+		//we come here only when a client has connected.
+		//Now we can read data from the socket
+		printf("A client connected!\r\n");
+		printf("Waiting for Client Data ...!\r\n");
+		while(1)
+		{
+			int len=recv(sn, receive_buff, RECEIVE_BUFF_SIZE); //cria uma variavel a qual recebe os dados do cliente
+			if(len==SOCKERR_SOCKSTATUS) //verifica se o cliente perdeu a conexao com o servidor
+			{
+				//client has disconnected
+				printf("Client has disconnected\r\n");
+				printf("*** SESSION OVER ***\r\n\r\n");
+				break;
+			}
+			receive_buff[len]='\0'; //recebe os dados ate o final do desejado, onde \0 indica o fim dos dados
+			printf("Received %d bytes from client\r\n",len);
+			printf("Data Received: %s", receive_buff);
+			//Echo the data back encloused in a [] pair
+			send(sn,(uint8_t*)"[",1);//starting sq bracket
+			send(sn,receive_buff,len);// the data
+			send(sn,(uint8_t*)"]\r\n",5);//closing sq bracket
+			if(len > 0)
+			{
 
-		  //success
-		  printf("Socket Created Successfully ! \r\n");
-		  uint8_t socket_io_mode=SOCK_IO_BLOCK;
-		  ctlsocket(sn, CS_SET_IOMODE , &socket_io_mode);//set blocking IO mode
-		  printf("Start listening on port %d ! \r\n",LISTEN_PORT);
-		  printf("Waiting for a client connection. \r\n");
-			  //Make it a passive socket (i.e. listen for connection)
-		  if(listen(sn)!=SOCK_OK)//our socket id is 1 (w5500 have 8 sockets from 0-7)
-		  {
-			  //error
-			  printf("Cannot listen on port %d",LISTEN_PORT);
-				  while(1);
-			  }
-			  uint8_t sr=0x00;//socket status register
-			  do
-		  {
-			  sr=getSn_SR(sn);//read status reg (SR of socket 1)
-		  }while (sr!=0x17 && sr!=0x00);
-			  if(sr==0x00)
-		  {
-			  printf("Some error occurred on server socket. Please restart.\r\n");
-			  while(1);
-		  }
-			  if(sr==0x17)
-		  {
-			  //we come here only when a client has connected.
-			  //Now we can read data from the socket
-			  printf("A client connected!\r\n");
-			  printf("Waiting for Client Data ...!\r\n");
-			  while(1)
-			  {
-				  int len=recv(sn, receive_buff, RECEIVE_BUFF_SIZE); //cria uma variavel a qual recebe os dados do cliente
-				  if(len==SOCKERR_SOCKSTATUS) //verifica se o cliente perdeu a conexao com o servidor
-				  {
-					  //client has disconnected
-					  printf("Client has disconnected\r\n");
-					  printf("*** SESSION OVER ***\r\n\r\n");
-					  break;
-				  }
-				  receive_buff[len]='\0'; //recebe os dados ate o final do desejado, onde \0 indica o fim dos dados
-				  printf("Received %d bytes from client\r\n",len);
-				  printf("Data Received: %s", receive_buff);
-				  //Echo the data back encloused in a [] pair
-				  send(sn,(uint8_t*)"[",1);//starting sq bracket
-				  send(sn,receive_buff,len);// the data
-				  send(sn,(uint8_t*)"]\r\n",5);//closing sq bracket
+			}
+			printf("\r\nECHO sent back to client\r\n");
 
-				  printf("\r\nECHO sent back to client\r\n");
-
-				  //Look for quit message and quit if received
-				  if(strcmp((char*)receive_buff,"QUIT")==0) //compara se a palavra recebida e a mesma escrita aqui, caso seja disconecta o cliente do servidor, lembrando que ocorre a diferenciacao das letras maiusculas e minusculas
-				  {
-					  printf("Received QUIT command from client\r\n");
-					  printf("Disconnecting ... \r\n");
-					  printf("*** SESSION OVER ***\r\n\r\n");
-					  disconnect(sn);//disconnect from the clinet
-					  break;//come out of while loop
-				  }
-				  if(strcmp((char*)receive_buff,"LD1G")==0)//compara para acender o led verde da placa
-				  {
-					  HAL_GPIO_TogglePin(LD1G_GPIO_Port,LD1G_Pin);
-
-					  if(HAL_GPIO_ReadPin(LD1G_GPIO_Port,LD1G_Pin) == GPIO_PIN_SET)
-					  {
-						  send(sn,(uint8_t*)"LED Verde Ligado\r\n",20);
-					  }
-					  else
-					  {
-						  send(sn,(uint8_t*)"LED Verde Desligado\r\n",23);
-					  }
-				  }
-				  if(strcmp((char*)receive_buff,"LD2B")==0)//compara para acender o led azul da placa
-				  {
-					  HAL_GPIO_TogglePin(LD2B_GPIO_Port,LD2B_Pin);
-					  if(HAL_GPIO_ReadPin(LD2B_GPIO_Port,LD2B_Pin) == GPIO_PIN_SET)
-					  {
-						  send(sn,(uint8_t*)"LED Azul Ligado\r\n",19);
-					  }
-					  else
-					  {
-						  send(sn,(uint8_t*)"LED Azul Desligado\r\n",22);
-					  }
-				  }
-				  if(strcmp((char*)receive_buff,"LD3R")==0) //compara para acender o led vermelho da placa
-				  {
-					  HAL_GPIO_TogglePin(LD3R_GPIO_Port,LD3R_Pin);
-					  if(HAL_GPIO_ReadPin(LD3R_GPIO_Port,LD3R_Pin) == GPIO_PIN_SET)
-					  {
-						  send(sn,(uint8_t*)"LED Vermelho Ligado\r\n",23);
-					  }
-					  else
-					  {
-					 	  send(sn,(uint8_t*)"LED Vermelho Desligado\r\n",26);
-					  }
-				  }
 
 			  }//While loop (as long as client is connected)
 		  }//if block, client connect success
+}
+
+void Comandos_Servidor(char* buff)
+{
+	switch (InterpretarComando(((char*) receive_buff)))
+	{
+	case LD1G:
+		HAL_GPIO_TogglePin(LD1G_GPIO_Port,LD1G_Pin);
+		if(HAL_GPIO_ReadPin(LD1G_GPIO_Port,LD1G_Pin) == GPIO_PIN_SET)
+		{
+			send(sn,(uint8_t*)"LED Verde Ligado\r\n",20);
+		}
+		else
+		{
+			send(sn,(uint8_t*)"LED Verde Desligado\r\n",23);
+		}
+	break;
+	case LD2B:
+		HAL_GPIO_TogglePin(LD2B_GPIO_Port,LD2B_Pin);
+		if(HAL_GPIO_ReadPin(LD2B_GPIO_Port,LD2B_Pin) == GPIO_PIN_SET)
+		{
+			send(sn,(uint8_t*)"LED Azul Ligado\r\n",19);
+		}
+		else
+		{
+			send(sn,(uint8_t*)"LED Azul Desligado\r\n",22);
+		}
+	break;
+	case LD3R:
+		HAL_GPIO_TogglePin(LD3R_GPIO_Port,LD3R_Pin);
+		if(HAL_GPIO_ReadPin(LD3R_GPIO_Port,LD3R_Pin) == GPIO_PIN_SET)
+		{
+			send(sn,(uint8_t*)"LED Vermelho Ligado\r\n",23);
+		}
+		else
+		{
+			send(sn,(uint8_t*)"LED Vermelho Desligado\r\n",26);
+		}
+	break;
+	case TEMP:
+		float temperatura = TMP100_ReadTemp();
+		char msg_temp[50];
+		sprintf(msg_temp, "Temp: %.2f C\r\n", temperatura);
+		send(sn, (uint8_t*)msg_temp, strlen(msg_temp));
+		break;
+		case SAIR:
+			send(sn,(uint8_t*)"Sendo Desconectado\r\n",23);
+			disconnect(sn);
+		break;
+		default:
+			send(sn,(uint8_t*)"Funcao Desconhecida\r\n",21);
+		break;
+	}
+}
+
+ComandosID InterpretarComando(char* buffer) {
+    // Compara o buffer com as palavras conhecidas
+	if (strncmp(buffer, "LD1G", 4) == 0) return LD1G;
+	if (strncmp(buffer, "LD2B", 4) == 0) return LD2B;
+	if (strncmp(buffer, "LD3R", 4) == 0) return LD3R;
+	if (strncmp(buffer, "SAIR", 4) == 0) return SAIR;
+	if (strncmp(buffer, "TEMP", 4) == 0) return TEMP;
+
+    return DESCONHECIDO;
 }
 
 //funções do TMP100
@@ -624,31 +631,6 @@ float TMP100_ReadTemp(void) {
     else {
         printf("Erro de leitura I2C\r\n");
         return -999.0f; // Valor de erro
-    }
-}
-
-void Verificar_Configuracao(void) {
-    uint8_t ponteiro = TMP100_REG_CONFIG; // Endereço do registro de config (geralmente 0x01)
-    uint8_t valorLido = 0;
-
-    // PASSO 1: Dizer ao TMP100 que queremos ler o Registro de Configuração
-    // Enviamos apenas o endereço do ponteiro (1 byte)
-    HAL_I2C_Master_Transmit(&hi2c2, TMP100_ADDR, &ponteiro, 1, 100);
-
-    // PASSO 2: Ler o valor que está lá
-    // O registro de configuração do TMP100 tem 1 byte (8 bits)
-    if (HAL_I2C_Master_Receive(&hi2c2, TMP100_ADDR, &valorLido, 1, 100) == HAL_OK) {
-
-        printf("Valor lido no registrador: 0x%02X\r\n", valorLido);
-
-        // Verificação lógica
-        if (valorLido == 0x60) {
-            printf("Sucesso! O sensor esta em 12-bits (0x60).\r\n");
-        } else {
-            printf("Aviso: O valor difere do esperado.\r\n");
-        }
-    } else {
-        printf("Erro ao tentar ler o sensor.\r\n");
     }
 }
 
